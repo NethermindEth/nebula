@@ -109,6 +109,9 @@ func (c *Crawler) Work(ctx context.Context, task PeerInfo) (core.CrawlResult[Pee
 		properties["waku_cluster_id"] = libp2pResult.WakuClusterID
 		properties["waku_cluster_shards"] = libp2pResult.WakuClusterShards
 	}
+	if libp2pResult.AztecStatusResponse != "" {
+		properties["aztec_status_response"] = libp2pResult.AztecStatusResponse
+	}
 
 	data, err := json.Marshal(properties)
 	if err != nil {
@@ -304,6 +307,7 @@ type Libp2pResult struct {
 	GenTCPAddr            bool // whether a TCP address was generated
 	WakuClusterID         uint32
 	WakuClusterShards     []uint32
+	AztecStatusResponse   string // only set for Aztec Testnet
 }
 
 func (c *Crawler) crawlLibp2p(ctx context.Context, pi PeerInfo) chan Libp2pResult {
@@ -344,6 +348,12 @@ func (c *Crawler) crawlLibp2p(ctx context.Context, pi PeerInfo) chan Libp2pResul
 				result.WakuClusterID, result.WakuClusterShards, err = c.wakuRequestMetadata(timeoutCtx, pi.ID())
 				if err != nil {
 					log.WithError(err).WithField("remoteID", pi.ID().ShortString()).Debugln("Could not request Waku metadata")
+				}
+			case config.NetworkAztecTestnet:
+				var err error
+				result.AztecStatusResponse, err = c.aztecRequestStatus(timeoutCtx, pi.ID())
+				if err != nil {
+					log.WithError(err).WithField("remoteID", pi.ID().ShortString()).Debugln("Could not request Aztec status")
 				}
 			}
 
@@ -688,4 +698,27 @@ func (c *Crawler) wakuRequestMetadata(ctx context.Context, pi peer.ID) (uint32, 
 	}
 
 	return response.GetClusterId(), response.GetShards(), nil
+}
+
+func (c *Crawler) aztecRequestStatus(ctx context.Context, pi peer.ID) (string, error) {
+	s, err := c.host.NewStream(ctx, pi, "/aztec/req/status/0.1.0")
+	if err != nil {
+		return "", fmt.Errorf("new stream: %w", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	req := []byte("status")
+	if _, err = s.Write(req); err != nil {
+		_ = s.Reset()
+		return "", fmt.Errorf("write aztec status request: %w", err)
+	}
+
+	resp := make([]byte, 32) // 32 bytes is enough for a status response
+	read, err := s.Read(resp)
+	if err != nil {
+		_ = s.Reset()
+		return "", fmt.Errorf("read aztec status response: %w", err)
+	}
+
+	return string(resp[:read]), nil
 }
