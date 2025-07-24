@@ -2,10 +2,12 @@ package discv5
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	basichost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	"github.com/libp2p/go-msgio/pbio"
 	ma "github.com/multiformats/go-multiaddr"
@@ -701,24 +704,40 @@ func (c *Crawler) wakuRequestMetadata(ctx context.Context, pi peer.ID) (uint32, 
 }
 
 func (c *Crawler) aztecRequestStatus(ctx context.Context, pi peer.ID) (string, error) {
-	s, err := c.host.NewStream(ctx, pi, "/aztec/req/status/0.1.0")
-	if err != nil {
-		return "", fmt.Errorf("new stream: %w", err)
-	}
-	defer func() { _ = s.Close() }()
+	statusChan := make(chan []byte, 1)
 
-	req := []byte("status")
-	if _, err = s.Write(req); err != nil {
-		_ = s.Reset()
-		return "", fmt.Errorf("write aztec status request: %w", err)
+	// Set up handler to receive status from validator
+	c.host.SetStreamHandler(protocol.ID("/aztec/req/status/0.1.0"), func(s network.Stream) {
+		defer s.Close()
+		log.Printf("📨 Received Aztec status request from %s", s.Conn().RemotePeer())
+
+		data, err := io.ReadAll(s)
+		if err != nil {
+			log.Printf("❌ Error reading status: %v", err)
+			return
+		}
+
+		// Send data to main goroutine
+		select {
+		case statusChan <- data:
+		default:
+		}
+	})
+
+	// Extract peer info
+
+	// Add to peerstore so validator can find us
+	addrInfo := c.host.Peerstore().PeerInfo(pi)
+
+	if err := c.host.Connect(ctx, addrInfo); err != nil {
+		return "", fmt.Errorf("connect to peer %s: %w", pi, err)
 	}
 
-	resp := make([]byte, 32) // 32 bytes is enough for a status response
-	read, err := s.Read(resp)
-	if err != nil {
-		_ = s.Reset()
-		return "", fmt.Errorf("read aztec status response: %w", err)
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case data := <-statusChan:
+		// Successfully received status data
+		return base64.RawStdEncoding.EncodeToString(data), nil
 	}
-
-	return string(resp[:read]), nil
 }
