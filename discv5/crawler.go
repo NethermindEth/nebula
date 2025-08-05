@@ -342,7 +342,12 @@ func (c *Crawler) crawlLibp2p(ctx context.Context, pi PeerInfo) chan Libp2pResul
 
 			// wait for the Identify exchange to complete (no-op if already done)
 			// the internal timeout is set to 30 s. When crawling we only allow 5s.
-			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			// For Aztec network, we allow 30s to accommodate status request retries
+			timeoutDuration := 5 * time.Second
+			if c.cfg.Network == config.NetworkAztecTestnet {
+				timeoutDuration = 60 * time.Second
+			}
+			timeoutCtx, cancel := context.WithTimeout(ctx, timeoutDuration)
 			defer cancel()
 
 			switch c.cfg.Network {
@@ -704,23 +709,98 @@ func (c *Crawler) wakuRequestMetadata(ctx context.Context, pi peer.ID) (uint32, 
 }
 
 func (c *Crawler) aztecRequestStatus(ctx context.Context, pi peer.ID) (string, error) {
+	const maxRetries = 5
+	const retryInterval = 5 * time.Second
+
+	log.WithFields(log.Fields{
+		"remoteID":   pi.ShortString(),
+		"maxRetries": maxRetries,
+		"interval":   retryInterval.String(),
+	}).Debugln("Starting Aztec status request with retries")
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Log attempt start
+		log.WithFields(log.Fields{
+			"remoteID": pi.ShortString(),
+			"attempt":  attempt + 1,
+			"of":       maxRetries,
+		}).Debugln("Attempting Aztec status request")
+
+		// Create a timeout context for this attempt
+		attemptCtx, cancel := context.WithTimeout(ctx, retryInterval)
+		status, err := c.attemptAztecStatus(attemptCtx, pi)
+		cancel()
+
+		if err == nil {
+			log.WithFields(log.Fields{
+				"remoteID": pi.ShortString(),
+				"attempt":  attempt + 1,
+			}).Infoln("Successfully received Aztec status")
+			return status, nil
+		}
+
+		// Log retry attempt
+		log.WithError(err).WithFields(log.Fields{
+			"remoteID":   pi.ShortString(),
+			"attempt":    attempt + 1,
+			"maxRetries": maxRetries,
+		}).Warnln("Aztec status request failed")
+
+		// Wait before retry (except on last attempt)
+		if attempt < maxRetries-1 {
+			log.WithFields(log.Fields{
+				"remoteID": pi.ShortString(),
+				"waitTime": retryInterval.String(),
+			}).Debugln("Waiting before retry")
+
+			select {
+			case <-ctx.Done():
+				log.WithFields(log.Fields{
+					"remoteID": pi.ShortString(),
+					"attempt":  attempt + 1,
+				}).Warnln("Aztec status request cancelled")
+				return "", ctx.Err()
+			case <-time.After(retryInterval):
+				continue
+			}
+		}
+	}
+
+	log.WithFields(log.Fields{
+		"remoteID": pi.ShortString(),
+		"attempts": maxRetries,
+	}).Errorln("Failed to get Aztec status after all retry attempts")
+
+	return "", fmt.Errorf("failed to get Aztec status after %d attempts", maxRetries)
+}
+
+func (c *Crawler) attemptAztecStatus(ctx context.Context, pi peer.ID) (string, error) {
 	statusChan := make(chan []byte, 1)
 
 	// Set up handler to receive status from validator
 	c.host.SetStreamHandler(protocol.ID("/aztec/req/status/0.1.0"), func(s network.Stream) {
 		defer s.Close()
-		log.Printf("📨 Received Aztec status request from %s", s.Conn().RemotePeer())
+		log.WithFields(log.Fields{
+			"remoteID": s.Conn().RemotePeer().ShortString(),
+			"localID":  s.Conn().LocalPeer().ShortString(),
+		}).Debugln("Received Aztec status stream from validator")
 
 		data, err := io.ReadAll(s)
 		if err != nil {
-			log.Printf("❌ Error reading status: %v", err)
+			log.WithError(err).WithField("remoteID", s.Conn().RemotePeer().ShortString()).Errorln("Error reading status data")
 			return
 		}
+
+		log.WithFields(log.Fields{
+			"remoteID": s.Conn().RemotePeer().ShortString(),
+			"dataSize": len(data),
+		}).Debugln("Successfully read status data")
 
 		// Send data to main goroutine
 		select {
 		case statusChan <- data:
 		default:
+			log.WithField("remoteID", s.Conn().RemotePeer().ShortString()).Warnln("Status channel full, dropping data")
 		}
 	})
 
@@ -729,15 +809,30 @@ func (c *Crawler) aztecRequestStatus(ctx context.Context, pi peer.ID) (string, e
 	// Add to peerstore so validator can find us
 	addrInfo := c.host.Peerstore().PeerInfo(pi)
 
+	log.WithFields(log.Fields{
+		"remoteID": pi.ShortString(),
+		"addrs":    len(addrInfo.Addrs),
+	}).Debugln("Connecting to peer for status request")
+
 	if err := c.host.Connect(ctx, addrInfo); err != nil {
+		log.WithError(err).WithField("remoteID", pi.ShortString()).Debugln("Failed to connect to peer")
 		return "", fmt.Errorf("connect to peer %s: %w", pi, err)
 	}
 
+	log.WithField("remoteID", pi.ShortString()).Debugln("Connected, waiting for status response")
+
 	select {
 	case <-ctx.Done():
+		log.WithField("remoteID", pi.ShortString()).Debugln("Status request timed out")
 		return "", ctx.Err()
 	case data := <-statusChan:
 		// Successfully received status data
-		return base64.RawStdEncoding.EncodeToString(data), nil
+		encodedData := base64.RawStdEncoding.EncodeToString(data)
+		log.WithFields(log.Fields{
+			"remoteID":    pi.ShortString(),
+			"dataSize":    len(data),
+			"encodedSize": len(encodedData),
+		}).Debugln("Successfully received and encoded status data")
+		return encodedData, nil
 	}
 }
