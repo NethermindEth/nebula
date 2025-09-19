@@ -778,7 +778,7 @@ func (c *Crawler) attemptAztecStatus(ctx context.Context, pi peer.ID) (string, e
 	statusChan := make(chan []byte, 1)
 
 	// Set up handler to receive status from validator
-	c.host.SetStreamHandler(protocol.ID("/aztec/req/status/0.1.0"), func(s network.Stream) {
+	c.host.SetStreamHandler(protocol.ID("/aztec/req/status/1.0.0"), func(s network.Stream) {
 		defer s.Close()
 		log.WithFields(log.Fields{
 			"remoteID": s.Conn().RemotePeer().ShortString(),
