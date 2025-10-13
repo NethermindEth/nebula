@@ -92,7 +92,7 @@ retryLoop:
 				errMsg = fmt.Sprintf("Connection refused, sleeping longer %s", sleepDur)
 			default:
 			}
-			logEntry.WithError(err).Debugf(errMsg)
+			logEntry.WithError(err).Debug(errMsg)
 			select {
 			case <-time.After(sleepDur):
 			case <-ctx.Done():
