@@ -158,7 +158,7 @@ func MonitorAction(c *cli.Context) error {
 
 		// This is a custom configuration option that only exists in our fork of go-libp2p.
 		// see: https://github.com/plprobelab/go-libp2p/commit/f6d73ce3093ded293f0de032d239709069fac586
-		ctx = network.WithDisableBackoff(ctx, "prevent backoff")
+		// ctx = network.WithDisableBackoff(ctx, "prevent backoff") // Not available in upstream libp2p
 
 		_, err = eng.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
