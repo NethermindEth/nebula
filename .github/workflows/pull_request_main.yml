@@ -39,7 +39,7 @@ jobs:
           --health-retries 5
     steps:
       - name: Checking out repository code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setting up Golang
         uses: actions/setup-go@v5

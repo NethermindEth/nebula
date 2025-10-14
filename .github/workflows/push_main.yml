@@ -46,7 +46,7 @@ jobs:
           --health-retries 5
     steps:
       - name: Checking out repository code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -67,7 +67,7 @@ jobs:
     needs: test
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.branch || github.ref }}
 
@@ -105,7 +105,7 @@ jobs:
     needs: test
     steps:
       - name: Checking out the repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.branch || github.ref }}
 
