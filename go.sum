@@ -202,8 +202,8 @@ github.com/distribution/reference v0.6.0 h1:0IXCQ5g4/QMHHkarYzh5l+u8T3t73zM5Qvfr
 github.com/distribution/reference v0.6.0/go.mod h1:BbU0aIcezP1/5jX/8MP0YiH4SdvB5Y4f/wlDRiLyi3E=
 github.com/dnaeon/go-vcr v1.1.0/go.mod h1:M7tiix8f0r6mKKJ3Yq/kqU1OYf3MnfmBWVbPx/yU9ko=
 github.com/dnaeon/go-vcr v1.2.0/go.mod h1:R4UdLID7HZT3taECzJs4YgbbH6PIGXB6W/sc5OLb6RQ=
-github.com/docker/docker v27.5.1+incompatible h1:4PYU5dnBYqRQi0294d1FBECqT9ECWeQAIfE8q4YnPY8=
-github.com/docker/docker v27.5.1+incompatible/go.mod h1:eEKB0N0r5NX/I1kEveEz05bcu8tLC/8azJZsviup8Sk=
+github.com/docker/docker v28.0.0+incompatible h1:Olh0KS820sJ7nPsBKChVhk5pzqcwDR15fumfAd/p9hM=
+github.com/docker/docker v28.0.0+incompatible/go.mod h1:eEKB0N0r5NX/I1kEveEz05bcu8tLC/8azJZsviup8Sk=
 github.com/docker/go-connections v0.5.0 h1:USnMq7hx7gwdVZq1L49hLXaFtUdTADjXGp+uj1Br63c=
 github.com/docker/go-connections v0.5.0/go.mod h1:ov60Kzw0kKElRwhNs9UlUHAE/F9Fe6GLaXnqyDdmEXc=
 github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4=
@@ -561,8 +561,6 @@ github.com/libp2p/go-libp2p-kad-dht v0.29.0 h1:045eW21lGlMSD9aKSZZGH4fnBMIInPwQL
 github.com/libp2p/go-libp2p-kad-dht v0.29.0/go.mod h1:mIci3rHSwDsxQWcCjfmxD8vMTgh5xLuvwb1D5WP8ZNk=
 github.com/libp2p/go-libp2p-kbucket v0.6.5 h1:Fsl1YvZcMwqrR4DYrTO02yo9PGYs2HBQIT3lGXFMTxg=
 github.com/libp2p/go-libp2p-kbucket v0.6.5/go.mod h1:U6WOd0BvnSp03IQSrjgM54tg7zh1UUNsXLJqAQzClTA=
-github.com/libp2p/go-libp2p-mplex v0.10.0 h1:6NKusNu1cw1A/RKb+Lm5aPGFk7HWVIXxl2azpwWqUxc=
-github.com/libp2p/go-libp2p-mplex v0.10.0/go.mod h1:7RT3qPFhDqz4yp5K5QwZB5vE902N8DmED3+e453fNrg=
 github.com/libp2p/go-libp2p-mplex v0.11.0 h1:0vwpLXRSfkTzshEjETIEgJaVxXvg+orbxYoIb3Ty5qM=
 github.com/libp2p/go-libp2p-mplex v0.11.0/go.mod h1:QrsdNY3lzjpdo9V1goJfPb0O65Nms0sUR8CDAO18f6k=
 github.com/libp2p/go-libp2p-pubsub v0.13.1 h1:tV3ttzzZSCk0EtEXnxVmWIXgjVxXx+20Jwjbs/Ctzjo=
