@@ -51,7 +51,7 @@ jobs:
           ref: ${{ github.event.inputs.branch || github.ref }}
 
       - name: Setting up Golang
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
 
