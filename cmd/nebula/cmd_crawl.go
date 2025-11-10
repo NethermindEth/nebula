@@ -382,72 +382,12 @@ func CrawlAction(c *cli.Context) error {
 		// finally, start the crawl
 		summary, runErr = eng.Run(ctx)
 
-	case string(config.NetworkAztecTestnet):
-		// Special case for Aztec Testnet - use DiscV5-only crawler to avoid libp2p disconnection issues
-		log.Infoln("Using Aztec DiscV5-only crawler to avoid libp2p disconnection issues")
-
-		bpEnodes, err := cfg.BootstrapEnodesV5()
-		if err != nil {
-			return err
-		}
-
-		for _, addrInfo := range bpAddrInfos {
-			n, err := utils.ToEnode(addrInfo.ID, addrInfo.Addrs)
-			if err != nil {
-				// this is just a best-effort operation so only
-				// log the error and continue
-				log.WithError(err).WithFields(log.Fields{
-					"pid":    addrInfo.ID,
-					"maddrs": addrInfo.Addrs,
-				}).Warnln("Failed transforming AddrInfo to *enode.Node")
-				continue
-			}
-			bpEnodes = append(bpEnodes, n)
-		}
-
-		protocolID, err := cfg.DiscV5ProtocolID()
-		if err != nil {
-			return fmt.Errorf("parse discv5 protocol ID: %w", err)
-		}
-
-		// configure the Aztec DiscV5-only crawl driver
-		driverCfg := &discv5.AztecDiscV5OnlyDriverConfig{
-			Version:          cfg.Root.Version(),
-			Network:          config.Network(cfg.Network),
-			DialTimeout:      cfg.Root.DialTimeout,
-			BootstrapPeers:   bpEnodes,
-			CrawlWorkerCount: cfg.CrawlWorkerCount,
-			AddrDialType:     cfg.AddrDialType(),
-			AddrTrackType:    cfg.AddrTrackType(),
-			KeepENR:          crawlConfig.KeepENR,
-			MeterProvider:    cfg.Root.MeterProvider,
-			TracerProvider:   cfg.Root.TracerProvider,
-			LogErrors:        cfg.Root.LogErrors,
-			UDPBufferSize:    cfg.Root.UDPBufferSize,
-			UDPRespTimeout:   crawlConfig.UDPRespTimeout,
-			Discv5ProtocolID: protocolID,
-		}
-
-		driver, err := discv5.NewAztecDiscV5OnlyDriver(dbc, driverCfg)
-		if err != nil {
-			return fmt.Errorf("new aztec discv5-only driver: %w", err)
-		}
-
-		handler := core.NewCrawlHandler[discv5.PeerInfo](handlerCfg)
-
-		eng, err := core.NewEngine[discv5.PeerInfo, core.CrawlResult[discv5.PeerInfo]](driver, handler, engineCfg)
-		if err != nil {
-			return fmt.Errorf("new engine: %w", err)
-		}
-
-		// finally, start the crawl
-		summary, runErr = eng.Run(ctx)
-
 	case string(config.NetworkEthCons),
 		string(config.NetworkHolesky),
 		string(config.NetworkPortal),
 		string(config.NetworkWakuStatus),
 		string(config.NetworkWakuTWN),
+		string(config.NetworkAztecTestnet),
 		string(config.NetworkGnosis):
 		// use a different driver etc. for the Ethereum consensus layer + Holeksy Testnet + Waku networks
 
