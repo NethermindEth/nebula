@@ -409,6 +409,14 @@ var (
 		"enr:-LO4QNTdBJe-2tIfXpzJmu4Tise0rRdPSn2gwQMtkVPe40szAdpWRgixGub2iUXMcxSQuQ8nkKh-GSvQpRKqw2XzUhQEhWF6dGVjqDAwLTExMTU1MTExLTAwMDAwMDAwLTAtMjI3ODAyMzktMmRhOWY4MDGCaWSCdjSCaXCEIrZz14lzZWNwMjU2azGhApwZiWnsA8TFqvz-sGDrgbi1AypT4QXJfFWdYOz2yeVtg3VkcIKd0A",
 	}
 
+	// BootstrapPeersAztec extracted from:
+	//  http://static.aztec.network/mainnet/bootnodes.json
+	BootstrapPeersAztec = []string{
+		"enr:-Ky4QKfjSRUjTZtECqEDcBRIZ9csT6-tNYm4c7u8wevju7gAFeQiOr96YUM3GT811gWQ7dTBNlH9MVWHSS2y9KYsMgsEhWF6dGVjoTAwLTEtMDAwMDAwMDAtMC0yMjc4MDIzOS0wYzc1NzZkM4JpZIJ2NIJpcIQiUGTtiXNlY3AyNTZrMaECy4Jsu1q_v6h66yi49G3D75G4RgaA_KoFQep112evENSDdWRwgp3Q",
+		"enr:-Ky4QHjSIFZWkQ6-etNQ7IsX1BvcbztYh0ea1svSJu4w_eiVK3JyIZYbV0U82271DpA0-yjLXV7EJz25CoajccyYifIEhWF6dGVjoTAwLTEtMDAwMDAwMDAtMC0yMjc4MDIzOS0wYzc1NzZkM4JpZIJ2NIJpcIQj5pOPiXNlY3AyNTZrMaEDv3oCuiQPtMPBQvBfNhljpk77zfB3LEbbs57Z2TtjNpSDdWRwgp3Q",
+		"enr:-Ky4QKlrL37e_eXt8IyZbl7Uxc5ReK_PKJUDGd6Uffm0Y0qEVUmUcZla6uyZj6iYM0UZdgwOQYsbNowaEm3E4DyXhQEEhWF6dGVjoTAwLTEtMDAwMDAwMDAtMC0yMjc4MDIzOS0wYzc1NzZkM4JpZIJ2NIJpcIQjx6S0iXNlY3AyNTZrMaEC1wiZRbCgTtGUIn10W_ryCOTcItCsnlAaWetP60yFLyCDdWRwgp3Q",
+	}
+
 	// BootstrapPeersGnosis extracted from:
 	//  https://github.com/gnosischain/configs/blob/main/mainnet/bootnodes.yaml
 	BootstrapPeersGnosis = []string{
