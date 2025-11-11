@@ -357,7 +357,7 @@ func (c *Crawler) crawlLibp2p(ctx context.Context, pi PeerInfo) chan Libp2pResul
 				if err != nil {
 					log.WithError(err).WithField("remoteID", pi.ID().ShortString()).Debugln("Could not request Waku metadata")
 				}
-			case config.NetworkAztecTestnet:
+			case config.NetworkAztecTestnet, config.NetworkAztec:
 				var err error
 				result.AztecStatusResponse, err = c.aztecRequestStatus(timeoutCtx, pi.ID())
 				if err != nil {

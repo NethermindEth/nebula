@@ -19,12 +19,12 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/libp2p/go-libp2p"
 	mplex "github.com/libp2p/go-libp2p-mplex"
+	libp2pconfig "github.com/libp2p/go-libp2p/config"
 	"github.com/libp2p/go-libp2p/core/connmgr"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	basichost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	"github.com/libp2p/go-libp2p/p2p/muxer/yamux"
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
@@ -302,7 +302,7 @@ func (d *CrawlDriver) NewWorker() (core.Worker[PeerInfo, core.CrawlResult[PeerIn
 	c := &Crawler{
 		id:       fmt.Sprintf("crawler-%02d", d.crawlerCount),
 		cfg:      d.cfg.CrawlerConfig(),
-		host:     h.(*basichost.BasicHost),
+		host:     h.(*libp2pconfig.ClosableBasicHost).BasicHost,
 		listener: listener,
 		done:     make(chan struct{}),
 	}
@@ -389,7 +389,7 @@ func newLibp2pHost(cfg *CrawlDriverConfig) (host.Host, error) {
 		h.SetStreamHandler("/eth2/beacon_chain/req/metadata/2/ssz_snappy", func(s network.Stream) { io.ReadAll(s) })
 		h.SetStreamHandler("/eth2/beacon_chain/req/goodbye/1/ssz_snappy", func(s network.Stream) { io.ReadAll(s) })
 		h.SetStreamHandler("/meshsub/1.1.0", func(s network.Stream) { io.ReadAll(s) }) // https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#the-gossip-domain-gossipsub
-	case config.NetworkAztecTestnet:
+	case config.NetworkAztecTestnet, config.NetworkAztec:
 		// Aztec protocol handlers to prevent disconnection, similar to the comment above.
 		h.SetStreamHandler("/aztec/req/status/1.0.0", func(s network.Stream) { io.ReadAll(s) })
 		h.SetStreamHandler("/aztec/req/ping/1.0.0", func(s network.Stream) { io.ReadAll(s) })
