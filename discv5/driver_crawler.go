@@ -389,7 +389,7 @@ func newLibp2pHost(cfg *CrawlDriverConfig) (host.Host, error) {
 		h.SetStreamHandler("/eth2/beacon_chain/req/metadata/2/ssz_snappy", func(s network.Stream) { io.ReadAll(s) })
 		h.SetStreamHandler("/eth2/beacon_chain/req/goodbye/1/ssz_snappy", func(s network.Stream) { io.ReadAll(s) })
 		h.SetStreamHandler("/meshsub/1.1.0", func(s network.Stream) { io.ReadAll(s) }) // https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#the-gossip-domain-gossipsub
-	case config.NetworkAztecTestnet, config.NetworkAztec:
+	case config.NetworkAztecTestnet, config.NetworkAztecMainnet:
 		// Aztec protocol handlers to prevent disconnection, similar to the comment above.
 		h.SetStreamHandler("/aztec/req/status/1.0.0", func(s network.Stream) { io.ReadAll(s) })
 		h.SetStreamHandler("/aztec/req/ping/1.0.0", func(s network.Stream) { io.ReadAll(s) })

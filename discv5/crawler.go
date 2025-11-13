@@ -344,7 +344,7 @@ func (c *Crawler) crawlLibp2p(ctx context.Context, pi PeerInfo) chan Libp2pResul
 			// the internal timeout is set to 30 s. When crawling we only allow 5s.
 			// For Aztec network, we allow 30s to accommodate status request retries
 			timeoutDuration := 5 * time.Second
-			if c.cfg.Network == config.NetworkAztecTestnet {
+			if c.cfg.Network == config.NetworkAztecTestnet || c.cfg.Network == config.NetworkAztecMainnet {
 				timeoutDuration = 60 * time.Second
 			}
 			timeoutCtx, cancel := context.WithTimeout(ctx, timeoutDuration)
@@ -357,7 +357,7 @@ func (c *Crawler) crawlLibp2p(ctx context.Context, pi PeerInfo) chan Libp2pResul
 				if err != nil {
 					log.WithError(err).WithField("remoteID", pi.ID().ShortString()).Debugln("Could not request Waku metadata")
 				}
-			case config.NetworkAztecTestnet, config.NetworkAztec:
+			case config.NetworkAztecTestnet, config.NetworkAztecMainnet:
 				var err error
 				result.AztecStatusResponse, err = c.aztecRequestStatus(timeoutCtx, pi.ID())
 				if err != nil {

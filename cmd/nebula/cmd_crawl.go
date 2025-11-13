@@ -388,7 +388,7 @@ func CrawlAction(c *cli.Context) error {
 		string(config.NetworkWakuStatus),
 		string(config.NetworkWakuTWN),
 		string(config.NetworkAztecTestnet),
-		string(config.NetworkAztec),
+		string(config.NetworkAztecMainnet),
 		string(config.NetworkGnosis):
 		// use a different driver etc. for the Ethereum consensus layer + Holeksy Testnet + Waku networks
 
