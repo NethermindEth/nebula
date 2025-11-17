@@ -56,6 +56,10 @@ type Crawler struct {
 
 var _ core.Worker[PeerInfo, core.CrawlResult[PeerInfo]] = (*Crawler)(nil)
 
+func isAztecNetwork(network config.Network) bool {
+	return network == config.NetworkAztecMainnet || network == config.NetworkAztecTestnet
+}
+
 func (c *Crawler) Work(ctx context.Context, task PeerInfo) (core.CrawlResult[PeerInfo], error) {
 	// add a startup jitter delay to prevent all workers to crawl at exactly the
 	// same time and potentially overwhelm the machine that Nebula is running on
@@ -97,9 +101,29 @@ func (c *Crawler) Work(ctx context.Context, task PeerInfo) (core.CrawlResult[Pee
 		properties["gen_tcp_addr"] = true
 	}
 
+	connectErr := libp2pResult.ConnectError
+	connectErrStr := libp2pResult.ConnectErrorStr
+
+	if isAztecNetwork(c.cfg.Network) {
+		discv5Online := discV5Result.RespondedAt != nil
+		properties["aztec_discv5_online"] = discv5Online
+
+		if discv5Online {
+			if connectErr != nil {
+				properties["aztec_libp2p_error"] = connectErrStr
+				if connectErrStr == pgmodels.NetErrorUnknown {
+					properties["aztec_libp2p_error_detail"] = connectErr.Error()
+				}
+			}
+
+			connectErr = nil
+			connectErrStr = ""
+		}
+	}
+
 	// keep track of all unknown connection errors
-	if libp2pResult.ConnectErrorStr == pgmodels.NetErrorUnknown && libp2pResult.ConnectError != nil {
-		properties["connect_error"] = libp2pResult.ConnectError.Error()
+	if connectErrStr == pgmodels.NetErrorUnknown && connectErr != nil {
+		properties["connect_error"] = connectErr.Error()
 	}
 
 	// keep track of all unknown crawl errors
@@ -171,9 +195,9 @@ func (c *Crawler) Work(ctx context.Context, task PeerInfo) (core.CrawlResult[Pee
 		FilteredMaddrs:      filteredMaddrs,
 		ExtraMaddrs:         extraMaddrs,
 		ConnectMaddr:        connectMaddr,
-		DialErrors:          db.MaddrErrors(libp2pResult.DialMaddrs, libp2pResult.ConnectError),
-		ConnectError:        libp2pResult.ConnectError,
-		ConnectErrorStr:     libp2pResult.ConnectErrorStr,
+		DialErrors:          db.MaddrErrors(libp2pResult.DialMaddrs, connectErr),
+		ConnectError:        connectErr,
+		ConnectErrorStr:     connectErrStr,
 		CrawlError:          discV5Result.Error,
 		CrawlErrorStr:       discV5Result.ErrorStr,
 		CrawlEndTime:        time.Now(),
