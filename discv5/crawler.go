@@ -2,12 +2,10 @@ package discv5
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/rand"
 	"strings"
 	"time"
@@ -18,18 +16,16 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
-	"github.com/libp2p/go-libp2p/core/protocol"
 	basichost "github.com/libp2p/go-libp2p/p2p/host/basic"
-	"github.com/libp2p/go-msgio/pbio"
 	ma "github.com/multiformats/go-multiaddr"
 	log "github.com/sirupsen/logrus"
-	wakupb "github.com/waku-org/go-waku/waku/v2/protocol/metadata/pb"
 	"go.uber.org/atomic"
 
 	"github.com/dennis-tra/nebula-crawler/config"
 	"github.com/dennis-tra/nebula-crawler/core"
 	"github.com/dennis-tra/nebula-crawler/db"
 	pgmodels "github.com/dennis-tra/nebula-crawler/db/models/pg"
+	"github.com/dennis-tra/nebula-crawler/discv5/behaviors"
 )
 
 const MaxCrawlRetriesAfterTimeout = 2 // magic
@@ -52,13 +48,10 @@ type Crawler struct {
 	listener     *discover.UDPv5
 	crawledPeers int
 	done         chan struct{}
+	behavior     behaviors.NetworkBehavior
 }
 
 var _ core.Worker[PeerInfo, core.CrawlResult[PeerInfo]] = (*Crawler)(nil)
-
-func isAztecNetwork(network config.Network) bool {
-	return network == config.NetworkAztecMainnet || network == config.NetworkAztecTestnet
-}
 
 func (c *Crawler) Work(ctx context.Context, task PeerInfo) (core.CrawlResult[PeerInfo], error) {
 	// add a startup jitter delay to prevent all workers to crawl at exactly the
@@ -104,22 +97,32 @@ func (c *Crawler) Work(ctx context.Context, task PeerInfo) (core.CrawlResult[Pee
 	connectErr := libp2pResult.ConnectError
 	connectErrStr := libp2pResult.ConnectErrorStr
 
-	if isAztecNetwork(c.cfg.Network) {
-		discv5Online := discV5Result.RespondedAt != nil
-		properties["aztec_discv5_online"] = discv5Online
+	// Use network behavior to process crawl results and potentially modify errors
+	discv5Online := discV5Result.RespondedAt != nil
 
-		if discv5Online {
-			if connectErr != nil {
-				properties["aztec_libp2p_error"] = connectErrStr
-				if connectErrStr == pgmodels.NetErrorUnknown {
-					properties["aztec_libp2p_error_detail"] = connectErr.Error()
-				}
-			}
+	// DEBUG: Log before processing
+	log.WithFields(log.Fields{
+		"remoteID":      task.peerID.ShortString(),
+		"behaviorName":  c.behavior.Name(),
+		"discv5Online":  discv5Online,
+		"hadConnectErr": connectErr != nil,
+		"connectErrStr": connectErrStr,
+	}).Debugln("[DEBUG] Before ProcessCrawlResult")
 
-			connectErr = nil
-			connectErrStr = ""
-		}
-	}
+	connectErr, connectErrStr = c.behavior.ProcessCrawlResult(
+		connectErr,
+		connectErrStr,
+		discv5Online,
+		properties,
+		libp2pResult.MetadataResponse,
+	)
+
+	// DEBUG: Log after processing
+	log.WithFields(log.Fields{
+		"remoteID":      task.peerID.ShortString(),
+		"hadConnectErr": connectErr != nil,
+		"connectErrStr": connectErrStr,
+	}).Debugln("[DEBUG] After ProcessCrawlResult")
 
 	// keep track of all unknown connection errors
 	if connectErrStr == pgmodels.NetErrorUnknown && connectErr != nil {
@@ -129,15 +132,6 @@ func (c *Crawler) Work(ctx context.Context, task PeerInfo) (core.CrawlResult[Pee
 	// keep track of all unknown crawl errors
 	if discV5Result.ErrorStr == pgmodels.NetErrorUnknown && discV5Result.Error != nil {
 		properties["crawl_error"] = discV5Result.Error.Error()
-	}
-
-	// extract waku information
-	if libp2pResult.WakuClusterID != 0 && len(libp2pResult.WakuClusterShards) > 0 {
-		properties["waku_cluster_id"] = libp2pResult.WakuClusterID
-		properties["waku_cluster_shards"] = libp2pResult.WakuClusterShards
-	}
-	if libp2pResult.AztecStatusResponse != "" {
-		properties["aztec_status_response"] = libp2pResult.AztecStatusResponse
 	}
 
 	data, err := json.Marshal(properties)
@@ -330,11 +324,9 @@ type Libp2pResult struct {
 	Agent                 string
 	Protocols             []string
 	ListenAddrs           []ma.Multiaddr
-	ConnClosedImmediately bool // whether conn was no error but still unconnected
-	GenTCPAddr            bool // whether a TCP address was generated
-	WakuClusterID         uint32
-	WakuClusterShards     []uint32
-	AztecStatusResponse   string // only set for Aztec Testnet
+	ConnClosedImmediately bool        // whether conn was no error but still unconnected
+	GenTCPAddr            bool        // whether a TCP address was generated
+	MetadataResponse      interface{} // network-specific metadata (Waku cluster info, Aztec status, etc.)
 }
 
 func (c *Crawler) crawlLibp2p(ctx context.Context, pi PeerInfo) chan Libp2pResult {
@@ -365,29 +357,17 @@ func (c *Crawler) crawlLibp2p(ctx context.Context, pi PeerInfo) chan Libp2pResul
 			result.ConnectMaddr = conn.RemoteMultiaddr()
 
 			// wait for the Identify exchange to complete (no-op if already done)
-			// the internal timeout is set to 30 s. When crawling we only allow 5s.
-			// For Aztec network, we allow 30s to accommodate status request retries
-			timeoutDuration := 5 * time.Second
-			if c.cfg.Network == config.NetworkAztecTestnet || c.cfg.Network == config.NetworkAztecMainnet {
-				timeoutDuration = 60 * time.Second
-			}
+			// the internal timeout is set to 30 s. Use network-specific timeout from behavior
+			timeoutDuration := c.behavior.IdentifyTimeout()
 			timeoutCtx, cancel := context.WithTimeout(ctx, timeoutDuration)
 			defer cancel()
 
-			switch c.cfg.Network {
-			case config.NetworkWakuStatus, config.NetworkWakuTWN:
-				var err error
-				result.WakuClusterID, result.WakuClusterShards, err = c.wakuRequestMetadata(timeoutCtx, pi.ID())
-				if err != nil {
-					log.WithError(err).WithField("remoteID", pi.ID().ShortString()).Debugln("Could not request Waku metadata")
-				}
-			case config.NetworkAztecTestnet, config.NetworkAztecMainnet:
-				var err error
-				result.AztecStatusResponse, err = c.aztecRequestStatus(timeoutCtx, pi.ID())
-				if err != nil {
-					log.WithError(err).WithField("remoteID", pi.ID().ShortString()).Debugln("Could not request Aztec status")
-				}
+			// Request network-specific metadata (e.g., Waku cluster info, Aztec status)
+			metadataResponse, err := c.behavior.RequestMetadata(timeoutCtx, c.host, pi.ID())
+			if err != nil {
+				log.WithError(err).WithField("remoteID", pi.ID().ShortString()).Debugln("Could not request network metadata")
 			}
+			result.MetadataResponse = metadataResponse
 
 			select {
 			case <-timeoutCtx.Done():
@@ -697,166 +677,4 @@ func (c *Crawler) crawlDiscV5(ctx context.Context, pi PeerInfo) chan DiscV5Resul
 // 0b00001101 -> false
 func noSuccessfulRequest(err error, errorBits uint32) bool {
 	return err != nil && errorBits&(errorBits+1) == 0
-}
-
-func (c *Crawler) wakuRequestMetadata(ctx context.Context, pi peer.ID) (uint32, []uint32, error) {
-	// cannot import github.com/waku-org/go-waku/waku/v2/protocol/metadata
-	// and use metadata.MetadataID_v1 because this would result in importing
-	// incompatible packages
-
-	s, err := c.host.NewStream(ctx, pi, "/vac/waku/metadata/1.0.0")
-	if err != nil {
-		return 0, nil, fmt.Errorf("new stream: %w", err)
-	}
-	defer func() { _ = s.Close() }()
-
-	req := &wakupb.WakuMetadataRequest{
-		ClusterId: &c.cfg.WakuClusterID,
-		Shards:    c.cfg.WakuClusterShards,
-	}
-
-	writer := pbio.NewDelimitedWriter(s)
-	reader := pbio.NewDelimitedReader(s, 4*1024*1024) // 4 MiB max
-
-	if err = writer.WriteMsg(req); err != nil {
-		_ = s.Reset()
-		return 0, nil, fmt.Errorf("write waku metadata request: %w", err)
-	}
-
-	response := &wakupb.WakuMetadataResponse{}
-	if err = reader.ReadMsg(response); err != nil {
-		_ = s.Reset()
-		return 0, nil, fmt.Errorf("read waku metadata response: %w", err)
-	}
-
-	return response.GetClusterId(), response.GetShards(), nil
-}
-
-func (c *Crawler) aztecRequestStatus(ctx context.Context, pi peer.ID) (string, error) {
-	const maxRetries = 5
-	const retryInterval = 5 * time.Second
-
-	log.WithFields(log.Fields{
-		"remoteID":   pi.ShortString(),
-		"maxRetries": maxRetries,
-		"interval":   retryInterval.String(),
-	}).Debugln("Starting Aztec status request with retries")
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		// Log attempt start
-		log.WithFields(log.Fields{
-			"remoteID": pi.ShortString(),
-			"attempt":  attempt + 1,
-			"of":       maxRetries,
-		}).Debugln("Attempting Aztec status request")
-
-		// Create a timeout context for this attempt
-		attemptCtx, cancel := context.WithTimeout(ctx, retryInterval)
-		status, err := c.attemptAztecStatus(attemptCtx, pi)
-		cancel()
-
-		if err == nil {
-			log.WithFields(log.Fields{
-				"remoteID": pi.ShortString(),
-				"attempt":  attempt + 1,
-			}).Infoln("Successfully received Aztec status")
-			return status, nil
-		}
-
-		// Log retry attempt
-		log.WithError(err).WithFields(log.Fields{
-			"remoteID":   pi.ShortString(),
-			"attempt":    attempt + 1,
-			"maxRetries": maxRetries,
-		}).Warnln("Aztec status request failed")
-
-		// Wait before retry (except on last attempt)
-		if attempt < maxRetries-1 {
-			log.WithFields(log.Fields{
-				"remoteID": pi.ShortString(),
-				"waitTime": retryInterval.String(),
-			}).Debugln("Waiting before retry")
-
-			select {
-			case <-ctx.Done():
-				log.WithFields(log.Fields{
-					"remoteID": pi.ShortString(),
-					"attempt":  attempt + 1,
-				}).Warnln("Aztec status request cancelled")
-				return "", ctx.Err()
-			case <-time.After(retryInterval):
-				continue
-			}
-		}
-	}
-
-	log.WithFields(log.Fields{
-		"remoteID": pi.ShortString(),
-		"attempts": maxRetries,
-	}).Errorln("Failed to get Aztec status after all retry attempts")
-
-	return "", fmt.Errorf("failed to get Aztec status after %d attempts", maxRetries)
-}
-
-func (c *Crawler) attemptAztecStatus(ctx context.Context, pi peer.ID) (string, error) {
-	statusChan := make(chan []byte, 1)
-
-	// Set up handler to receive status from validator
-	c.host.SetStreamHandler(protocol.ID("/aztec/req/status/1.0.0"), func(s network.Stream) {
-		defer s.Close()
-		log.WithFields(log.Fields{
-			"remoteID": s.Conn().RemotePeer().ShortString(),
-			"localID":  s.Conn().LocalPeer().ShortString(),
-		}).Debugln("Received Aztec status stream from validator")
-
-		data, err := io.ReadAll(s)
-		if err != nil {
-			log.WithError(err).WithField("remoteID", s.Conn().RemotePeer().ShortString()).Errorln("Error reading status data")
-			return
-		}
-
-		log.WithFields(log.Fields{
-			"remoteID": s.Conn().RemotePeer().ShortString(),
-			"dataSize": len(data),
-		}).Debugln("Successfully read status data")
-
-		// Send data to main goroutine
-		select {
-		case statusChan <- data:
-		default:
-			log.WithField("remoteID", s.Conn().RemotePeer().ShortString()).Warnln("Status channel full, dropping data")
-		}
-	})
-
-	// Extract peer info
-
-	// Add to peerstore so validator can find us
-	addrInfo := c.host.Peerstore().PeerInfo(pi)
-
-	log.WithFields(log.Fields{
-		"remoteID": pi.ShortString(),
-		"addrs":    len(addrInfo.Addrs),
-	}).Debugln("Connecting to peer for status request")
-
-	if err := c.host.Connect(ctx, addrInfo); err != nil {
-		log.WithError(err).WithField("remoteID", pi.ShortString()).Debugln("Failed to connect to peer")
-		return "", fmt.Errorf("connect to peer %s: %w", pi, err)
-	}
-
-	log.WithField("remoteID", pi.ShortString()).Debugln("Connected, waiting for status response")
-
-	select {
-	case <-ctx.Done():
-		log.WithField("remoteID", pi.ShortString()).Debugln("Status request timed out")
-		return "", ctx.Err()
-	case data := <-statusChan:
-		// Successfully received status data
-		encodedData := base64.RawStdEncoding.EncodeToString(data)
-		log.WithFields(log.Fields{
-			"remoteID":    pi.ShortString(),
-			"dataSize":    len(data),
-			"encodedSize": len(encodedData),
-		}).Debugln("Successfully received and encoded status data")
-		return encodedData, nil
-	}
 }
