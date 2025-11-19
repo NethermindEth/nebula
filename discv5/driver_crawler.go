@@ -6,7 +6,6 @@ import (
 	crand "crypto/rand"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
 	"runtime"
 	"sync"
@@ -38,6 +37,7 @@ import (
 	"github.com/dennis-tra/nebula-crawler/config"
 	"github.com/dennis-tra/nebula-crawler/core"
 	"github.com/dennis-tra/nebula-crawler/db"
+	"github.com/dennis-tra/nebula-crawler/discv5/behaviors"
 	"github.com/dennis-tra/nebula-crawler/utils"
 )
 
@@ -208,6 +208,27 @@ type CrawlDriver struct {
 
 var _ core.Driver[PeerInfo, core.CrawlResult[PeerInfo]] = (*CrawlDriver)(nil)
 
+// createNetworkBehavior creates the appropriate NetworkBehavior based on the network configuration
+func createNetworkBehavior(cfg *CrawlDriverConfig) behaviors.NetworkBehavior {
+	switch config.GetNetworkFamily(cfg.Network) {
+	case config.NetworkFamilyAztec:
+		log.WithField("network", cfg.Network).Debugln("Using Aztec network behavior")
+		return behaviors.NewAztec()
+
+	case config.NetworkFamilyWaku:
+		log.WithField("network", cfg.Network).Debugln("Using Waku network behavior")
+		return behaviors.NewWaku(cfg.WakuClusterID, cfg.WakuClusterShards)
+
+	case config.NetworkFamilyEthereumConsensus:
+		log.WithField("network", cfg.Network).Debugln("Using Ethereum Consensus network behavior")
+		return behaviors.NewEthereumConsensus()
+
+	default:
+		log.WithField("network", cfg.Network).Debugln("Using default network behavior")
+		return behaviors.NewDefault()
+	}
+}
+
 func NewCrawlDriver(dbc db.Client, cfg *CrawlDriverConfig) (*CrawlDriver, error) {
 	// create a libp2p host per CPU core to distribute load
 	hosts := make([]host.Host, 0, runtime.NumCPU())
@@ -299,12 +320,16 @@ func (d *CrawlDriver) NewWorker() (core.Worker[PeerInfo, core.CrawlResult[PeerIn
 	// evenly assign a libp2p hosts to crawler workers
 	h := d.hosts[d.crawlerCount%len(d.hosts)]
 
+	// Create the appropriate network behavior
+	behavior := createNetworkBehavior(d.cfg)
+
 	c := &Crawler{
 		id:       fmt.Sprintf("crawler-%02d", d.crawlerCount),
 		cfg:      d.cfg.CrawlerConfig(),
 		host:     h.(*libp2pconfig.ClosableBasicHost).BasicHost,
 		listener: listener,
 		done:     make(chan struct{}),
+		behavior: behavior,
 	}
 
 	d.crawlerCount += 1
@@ -375,25 +400,17 @@ func newLibp2pHost(cfg *CrawlDriverConfig) (host.Host, error) {
 		return nil, fmt.Errorf("new libp2p host: %w", err)
 	}
 
-	switch cfg.Network {
-	case config.NetworkEthCons, config.NetworkHolesky, config.NetworkPortal:
-		// According to Diva, these are required protocols. Some of them are just
-		// assumed to be required. We just read from the stream indefinitely to
-		// gain time for the identify exchange to finish. We just pretend to support
-		// these protocols and keep the stream busy until we have gathered all the
-		// information we were interested in. This includes the agend version and
-		// all supported protocols.
-		h.SetStreamHandler("/eth2/beacon_chain/req/ping/1/ssz_snappy", func(s network.Stream) { io.ReadAll(s) })
-		h.SetStreamHandler("/eth2/beacon_chain/req/status/1/ssz_snappy", func(s network.Stream) { io.ReadAll(s) })
-		h.SetStreamHandler("/eth2/beacon_chain/req/metadata/1/ssz_snappy", func(s network.Stream) { io.ReadAll(s) })
-		h.SetStreamHandler("/eth2/beacon_chain/req/metadata/2/ssz_snappy", func(s network.Stream) { io.ReadAll(s) })
-		h.SetStreamHandler("/eth2/beacon_chain/req/goodbye/1/ssz_snappy", func(s network.Stream) { io.ReadAll(s) })
-		h.SetStreamHandler("/meshsub/1.1.0", func(s network.Stream) { io.ReadAll(s) }) // https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#the-gossip-domain-gossipsub
-	case config.NetworkAztecTestnet, config.NetworkAztecMainnet:
-		// Aztec protocol handlers to prevent disconnection, similar to the comment above.
-		h.SetStreamHandler("/aztec/req/status/1.0.0", func(s network.Stream) { io.ReadAll(s) })
-		h.SetStreamHandler("/aztec/req/ping/1.0.0", func(s network.Stream) { io.ReadAll(s) })
-		h.SetStreamHandler("/aztec/id/1.0.0", func(s network.Stream) { io.ReadAll(s) })
+	// Register network-specific stream handlers using the behavior pattern
+	behavior := createNetworkBehavior(cfg)
+	streamHandlers := behavior.StreamHandlers()
+	if streamHandlers != nil {
+		basicH := h.(*libp2pconfig.ClosableBasicHost).BasicHost
+		for protocolID, handlerFunc := range streamHandlers {
+			handler := handlerFunc(basicH)
+			h.SetStreamHandler(protocolID, func(s network.Stream) {
+				handler(s)
+			})
+		}
 	}
 	log.WithField("peerID", h.ID().String()).Infoln("Started libp2p host")
 
