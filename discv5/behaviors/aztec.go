@@ -46,13 +46,6 @@ func (a *AztecBehavior) ProcessCrawlResult(
 	// Track whether the node responded to discv5
 	properties["aztec_discv5_online"] = discv5Responded
 
-	// DEBUG: Log the processing
-	log.WithFields(log.Fields{
-		"discv5Responded": discv5Responded,
-		"hadConnectErr":   connectErr != nil,
-		"connectErrStr":   connectErrStr,
-	}).Debugln("[AZTEC] ProcessCrawlResult called")
-
 	// Add Aztec status response to properties if available
 	if statusResponse, ok := metadataResponse.(string); ok && statusResponse != "" {
 		properties["aztec_status_response"] = statusResponse
@@ -66,7 +59,6 @@ func (a *AztecBehavior) ProcessCrawlResult(
 			if connectErrStr == pgmodels.NetErrorUnknown {
 				properties["aztec_libp2p_error_detail"] = connectErr.Error()
 			}
-			log.Debugln("[AZTEC] Clearing libp2p error for discv5-responsive node")
 		}
 
 		// Clear the connection errors - node is considered online
@@ -74,7 +66,6 @@ func (a *AztecBehavior) ProcessCrawlResult(
 	}
 
 	// If node didn't respond to discv5, keep the original errors
-	log.Debugln("[AZTEC] Node did not respond to discv5, keeping errors")
 	return connectErr, connectErrStr
 }
 

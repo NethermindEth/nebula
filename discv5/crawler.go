@@ -100,15 +100,6 @@ func (c *Crawler) Work(ctx context.Context, task PeerInfo) (core.CrawlResult[Pee
 	// Use network behavior to process crawl results and potentially modify errors
 	discv5Online := discV5Result.RespondedAt != nil
 
-	// DEBUG: Log before processing
-	log.WithFields(log.Fields{
-		"remoteID":      task.peerID.ShortString(),
-		"behaviorName":  c.behavior.Name(),
-		"discv5Online":  discv5Online,
-		"hadConnectErr": connectErr != nil,
-		"connectErrStr": connectErrStr,
-	}).Debugln("[DEBUG] Before ProcessCrawlResult")
-
 	connectErr, connectErrStr = c.behavior.ProcessCrawlResult(
 		connectErr,
 		connectErrStr,
@@ -116,13 +107,6 @@ func (c *Crawler) Work(ctx context.Context, task PeerInfo) (core.CrawlResult[Pee
 		properties,
 		libp2pResult.MetadataResponse,
 	)
-
-	// DEBUG: Log after processing
-	log.WithFields(log.Fields{
-		"remoteID":      task.peerID.ShortString(),
-		"hadConnectErr": connectErr != nil,
-		"connectErrStr": connectErrStr,
-	}).Debugln("[DEBUG] After ProcessCrawlResult")
 
 	// keep track of all unknown connection errors
 	if connectErrStr == pgmodels.NetErrorUnknown && connectErr != nil {

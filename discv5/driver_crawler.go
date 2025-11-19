@@ -322,13 +322,6 @@ func (d *CrawlDriver) NewWorker() (core.Worker[PeerInfo, core.CrawlResult[PeerIn
 
 	// Create the appropriate network behavior
 	behavior := createNetworkBehavior(d.cfg)
-	
-	// DEBUG: Log the behavior being used
-	log.WithFields(log.Fields{
-		"crawlerID":    fmt.Sprintf("crawler-%02d", d.crawlerCount),
-		"network":      d.cfg.Network,
-		"behaviorName": behavior.Name(),
-	}).Infoln("[DEBUG] Created crawler with behavior")
 
 	c := &Crawler{
 		id:       fmt.Sprintf("crawler-%02d", d.crawlerCount),
