@@ -1,8 +1,6 @@
 module github.com/dennis-tra/nebula-crawler
 
-go 1.23.0
-
-toolchain go1.23.2
+go 1.24.0
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.31.0
@@ -50,7 +48,7 @@ require (
 	go.uber.org/goleak v1.3.0
 	go.uber.org/mock v0.5.0
 	golang.org/x/net v0.39.0
-	golang.org/x/sync v0.13.0
+	golang.org/x/sync v0.18.0
 )
 
 require (
