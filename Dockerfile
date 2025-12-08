@@ -1,6 +1,6 @@
 # We use the -alpine build image to build Nebula agains musl because we need
 # CGO to be enabled and I'd like use an alpine base image for the final image.
-FROM golang:1.25.3-alpine AS builder
+FROM golang:1.25.5-alpine AS builder
 
 ARG VERSION
 ARG COMMIT
