@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -19,7 +20,15 @@ import (
 // AztecBehavior implements the Aztec network-specific behavior.
 // Aztec uses a hybrid crawling approach where nodes that respond to discv5
 // are considered online even if libp2p connection fails.
-type AztecBehavior struct{}
+//
+// The pendingRequests map routes incoming status stream responses to the correct
+// waiting crawler. This is necessary because multiple crawlers share the same
+// libp2p host, so a single global stream handler must demultiplex responses
+// by remote peer ID.
+type AztecBehavior struct {
+	// pendingRequests maps peer.ID -> chan []byte for routing status responses
+	pendingRequests sync.Map
+}
 
 var _ NetworkBehavior = (*AztecBehavior)(nil)
 
@@ -138,34 +147,11 @@ func (a *AztecBehavior) RequestMetadata(ctx context.Context, host *basichost.Bas
 func (a *AztecBehavior) attemptAztecStatus(ctx context.Context, host *basichost.BasicHost, pi peer.ID) (string, error) {
 	statusChan := make(chan []byte, 1)
 
-	// Set up handler to receive status from validator
-	host.SetStreamHandler(protocol.ID("/aztec/req/status/1.0.0"), func(s network.Stream) {
-		defer s.Close()
-		log.WithFields(log.Fields{
-			"remoteID": s.Conn().RemotePeer().ShortString(),
-			"localID":  s.Conn().LocalPeer().ShortString(),
-		}).Debugln("Received Aztec status stream from validator")
+	// Register this request so the stream handler (set up via StreamHandlers)
+	// can route the response from this peer to our channel.
+	a.pendingRequests.Store(pi, statusChan)
+	defer a.pendingRequests.Delete(pi)
 
-		data, err := io.ReadAll(s)
-		if err != nil {
-			log.WithError(err).WithField("remoteID", s.Conn().RemotePeer().ShortString()).Errorln("Error reading status data")
-			return
-		}
-
-		log.WithFields(log.Fields{
-			"remoteID": s.Conn().RemotePeer().ShortString(),
-			"dataSize": len(data),
-		}).Debugln("Successfully read status data")
-
-		// Send data to main goroutine
-		select {
-		case statusChan <- data:
-		default:
-			log.WithField("remoteID", s.Conn().RemotePeer().ShortString()).Warnln("Status channel full, dropping data")
-		}
-	})
-
-	// Add to peerstore so validator can find us
 	addrInfo := host.Peerstore().PeerInfo(pi)
 
 	log.WithFields(log.Fields{
@@ -185,7 +171,6 @@ func (a *AztecBehavior) attemptAztecStatus(ctx context.Context, host *basichost.
 		log.WithField("remoteID", pi.ShortString()).Debugln("Status request timed out")
 		return "", ctx.Err()
 	case data := <-statusChan:
-		// Successfully received status data
 		encodedData := base64.RawStdEncoding.EncodeToString(data)
 		log.WithFields(log.Fields{
 			"remoteID":    pi.ShortString(),
@@ -196,27 +181,49 @@ func (a *AztecBehavior) attemptAztecStatus(ctx context.Context, host *basichost.
 	}
 }
 
-// StreamHandlers returns the Aztec protocol handlers
+// StreamHandlers returns the Aztec protocol handlers.
+// The status handler routes incoming responses to the correct waiting crawler
+// via the pendingRequests map, keyed by remote peer ID.
 func (a *AztecBehavior) StreamHandlers() map[protocol.ID]StreamHandlerFunc {
 	return map[protocol.ID]StreamHandlerFunc{
 		"/aztec/req/status/1.0.0": func(h *basichost.BasicHost) func(s interface{}) {
 			return func(s interface{}) {
-				if stream, ok := s.(network.Stream); ok {
-					io.ReadAll(stream)
+				stream, ok := s.(network.Stream)
+				if !ok {
+					return
+				}
+				defer stream.Close()
+
+				remotePeer := stream.Conn().RemotePeer()
+
+				data, err := io.ReadAll(io.LimitReader(stream, 1<<20)) // 1 MiB limit
+				if err != nil {
+					log.WithError(err).WithField("remoteID", remotePeer.ShortString()).Debugln("Error reading Aztec status data")
+					return
+				}
+
+				if ch, ok := a.pendingRequests.Load(remotePeer); ok {
+					select {
+					case ch.(chan []byte) <- data:
+					default:
+						log.WithField("remoteID", remotePeer.ShortString()).Debugln("Status channel full, dropping data")
+					}
 				}
 			}
 		},
 		"/aztec/req/ping/1.0.0": func(h *basichost.BasicHost) func(s interface{}) {
 			return func(s interface{}) {
 				if stream, ok := s.(network.Stream); ok {
-					io.ReadAll(stream)
+					defer stream.Close()
+					io.ReadAll(io.LimitReader(stream, 1<<20))
 				}
 			}
 		},
 		"/aztec/id/1.0.0": func(h *basichost.BasicHost) func(s interface{}) {
 			return func(s interface{}) {
 				if stream, ok := s.(network.Stream); ok {
-					io.ReadAll(stream)
+					defer stream.Close()
+					io.ReadAll(io.LimitReader(stream, 1<<20))
 				}
 			}
 		},
