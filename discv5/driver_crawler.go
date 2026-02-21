@@ -204,6 +204,7 @@ type CrawlDriver struct {
 	crawlerCount int
 	writerCount  int
 	crawler      []*Crawler
+	behavior     behaviors.NetworkBehavior
 }
 
 var _ core.Driver[PeerInfo, core.CrawlResult[PeerInfo]] = (*CrawlDriver)(nil)
@@ -230,10 +231,15 @@ func createNetworkBehavior(cfg *CrawlDriverConfig) behaviors.NetworkBehavior {
 }
 
 func NewCrawlDriver(dbc db.Client, cfg *CrawlDriverConfig) (*CrawlDriver, error) {
+	// Create network behavior once and share across all hosts and crawlers.
+	// This is important for behaviors like Aztec that use shared state (sync.Map)
+	// to route stream responses to the correct crawler.
+	behavior := createNetworkBehavior(cfg)
+
 	// create a libp2p host per CPU core to distribute load
 	hosts := make([]host.Host, 0, runtime.NumCPU())
 	for i := 0; i < runtime.NumCPU(); i++ {
-		h, err := newLibp2pHost(cfg)
+		h, err := newLibp2pHost(cfg, behavior)
 		if err != nil {
 			return nil, fmt.Errorf("new libp2p host: %w", err)
 		}
@@ -265,6 +271,7 @@ func NewCrawlDriver(dbc db.Client, cfg *CrawlDriverConfig) (*CrawlDriver, error)
 		tasksChan: tasksChan,
 		peerstore: peerstore,
 		crawler:   make([]*Crawler, 0),
+		behavior:  behavior,
 	}, nil
 }
 
@@ -320,16 +327,13 @@ func (d *CrawlDriver) NewWorker() (core.Worker[PeerInfo, core.CrawlResult[PeerIn
 	// evenly assign a libp2p hosts to crawler workers
 	h := d.hosts[d.crawlerCount%len(d.hosts)]
 
-	// Create the appropriate network behavior
-	behavior := createNetworkBehavior(d.cfg)
-
 	c := &Crawler{
 		id:       fmt.Sprintf("crawler-%02d", d.crawlerCount),
 		cfg:      d.cfg.CrawlerConfig(),
 		host:     h.(*libp2pconfig.ClosableBasicHost).BasicHost,
 		listener: listener,
 		done:     make(chan struct{}),
-		behavior: behavior,
+		behavior: d.behavior,
 	}
 
 	d.crawlerCount += 1
@@ -365,7 +369,7 @@ func (d *CrawlDriver) Close() {
 	}
 }
 
-func newLibp2pHost(cfg *CrawlDriverConfig) (host.Host, error) {
+func newLibp2pHost(cfg *CrawlDriverConfig, behavior behaviors.NetworkBehavior) (host.Host, error) {
 	cm := connmgr.NullConnMgr{}
 	rm := network.NullResourceManager{}
 
@@ -401,7 +405,6 @@ func newLibp2pHost(cfg *CrawlDriverConfig) (host.Host, error) {
 	}
 
 	// Register network-specific stream handlers using the behavior pattern
-	behavior := createNetworkBehavior(cfg)
 	streamHandlers := behavior.StreamHandlers()
 	if streamHandlers != nil {
 		basicH := h.(*libp2pconfig.ClosableBasicHost).BasicHost
